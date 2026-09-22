@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="GeoGuessr sur la Cité Descartes, avec des photos Panoramax très zoomées." />
+    <title>DescartesGuessr</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📍</text></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewer"></div>
+
+      <header id="hud" hidden>
+        <span>Manche <b id="hud-round">1</b>/<span id="hud-rounds">5</span></span>
+        <span>Score <b id="hud-score">0</b></span>
+      </header>
+
+      <div id="credits" hidden></div>
+
+      <section id="map-panel" hidden>
+        <div id="map"></div>
+        <div id="result-bar" hidden>
+          <div id="result-text"></div>
+          <a id="result-link" target="_blank" rel="noopener">Voir sur Panoramax ↗</a>
+        </div>
+        <button id="guess-btn" class="btn" disabled>Placez votre réponse sur la carte</button>
+        <button id="next-btn" class="btn" hidden>Manche suivante</button>
+      </section>
+      <button id="map-toggle" class="btn" hidden>🗺️ Carte</button>
+
+      <section id="screen" class="screen">
+        <div class="card">
+          <h1>📍 DescartesGuessr</h1>
+          <p id="screen-text">
+            Retrouvez où ont été prises ces photos de la <b>Cité Descartes</b> (Champs-sur-Marne).<br />
+            Attention : l'image est <b>très zoomée</b>. Vous pouvez regarder autour, mais pas dézoomer.
+          </p>
+          <div id="screen-extra"></div>
+          <button id="start-btn" class="btn big">Jouer</button>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
