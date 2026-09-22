@@ -1,4 +1,4 @@
-# 📍 DescartesGuessr
+# DescartesGuessr
 
 Un GeoGuessr limité à la **Cité Descartes** (Champs-sur-Marne / Noisy-le-Grand), avec des photos
 [Panoramax](https://panoramax.fr) affichées **très zoomées** : on peut regarder autour de soi, mais jamais dézoomer.
@@ -35,10 +35,13 @@ Tout se trouve dans [`src/config.ts`](src/config.ts) :
 | `FLAT_ZOOM` | facteur de zoom des photos classiques |
 | `SCORE_SCALE_METERS` | sévérité du barème |
 
-## Déploiement
+## Déploiement (Vercel)
 
-Le workflow `.github/workflows/deploy.yml` publie le site sur GitHub Pages à chaque push sur `main`.
-Il faut d'abord activer Pages avec la source « GitHub Actions » dans les réglages du dépôt.
+Importer le dépôt sur [Vercel](https://vercel.com/new) : le framework Vite est détecté automatiquement
+(réglages explicites dans `vercel.json` : build `npm run build`, sortie `dist`). Chaque push sur la branche de
+production redéploie le site, et chaque branche ou PR a son URL de prévisualisation.
+
+En ligne de commande : `npx vercel` (prévisualisation) puis `npx vercel --prod`.
 
 ## Pourquoi pas Google Street View ?
 

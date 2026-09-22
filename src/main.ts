@@ -93,7 +93,7 @@ async function startGame(): Promise<void> {
   } catch (e) {
     pool = null;
     showScreen(
-      `Impossible de contacter Panoramax 😕<br><small>${(e as Error).message}</small>`,
+      `Impossible de contacter Panoramax.<br><small>${(e as Error).message}</small>`,
       '',
       'Réessayer',
     );
@@ -190,7 +190,7 @@ function endGame(): void {
   guessMap.showSummary(results.map((r) => ({ answer: r.pic.coords, guess: r.guess })));
   showScreen(
     `Score final : <b class="total">${total.toLocaleString('fr-FR')}</b> / ${(results.length * 5000).toLocaleString('fr-FR')}` +
-      (record ? '<br>🏆 Nouveau record !' : best ? `<br><small>Record : ${best.toLocaleString('fr-FR')}</small>` : ''),
+      (record ? '<br>Nouveau record !' : best ? `<br><small>Record : ${best.toLocaleString('fr-FR')}</small>` : ''),
     `<table class="recap"><thead><tr><th>#</th><th>Distance</th><th>Points</th><th></th></tr></thead><tbody>${rows}</tbody></table>`,
     'Rejouer',
   );
