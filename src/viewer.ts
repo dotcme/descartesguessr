@@ -1,7 +1,14 @@
-import { Viewer } from '@photo-sphere-viewer/core';
+import { Cache, EquirectangularAdapter, Viewer } from '@photo-sphere-viewer/core';
 import '@photo-sphere-viewer/core/index.css';
+import { chooseFlatView, chooseSphereView, isUsableImage, loadWithLuma, type LumaGrid } from './analyze';
 import { FLAT_ZOOM, SPHERE_FOV } from './config';
 import type { Picture } from './panoramax';
+
+// On charge nous-mêmes les images en blob: ; inutile que PSV les garde en cache
+Cache.enabled = false;
+
+/** Photo écartée volontairement (trop sombre, rien d'intéressant à montrer…). */
+export class RejectedPicture extends Error {}
 
 /**
  * Affiche une photo Panoramax très zoomée : on peut regarder autour
@@ -14,6 +21,7 @@ export class ZoomedViewer {
   private flatImg: HTMLImageElement;
   private sphere?: Viewer;
   private flat = { tx: 0, ty: 0, minX: 0, minY: 0 };
+  private objectUrl?: string;
 
   constructor(root: HTMLElement) {
     this.sphereEl = document.createElement('div');
@@ -26,29 +34,56 @@ export class ZoomedViewer {
     this.flatEl.append(this.flatImg);
     root.append(this.sphereEl, this.flatEl);
     this.setupFlatDrag();
-    window.addEventListener('resize', () => this.layoutFlat(false));
+    window.addEventListener('resize', () => this.layoutFlat());
   }
 
   async show(pic: Picture): Promise<void> {
-    if (pic.is360) {
-      this.flatEl.hidden = true;
-      this.sphereEl.hidden = false;
-      await this.showSphere(pic);
-    } else {
-      this.sphereEl.hidden = true;
-      this.flatEl.hidden = false;
-      await this.showFlat(pic);
+    const loaded = await this.load(pic);
+    if (loaded && !isUsableImage(loaded.luma)) {
+      URL.revokeObjectURL(loaded.objectUrl);
+      throw new RejectedPicture('Photo trop sombre ou vide');
     }
+    try {
+      if (pic.is360) {
+        if (!loaded) throw new Error('Image introuvable');
+        await this.showSphere(loaded.objectUrl, loaded.luma);
+      } else {
+        await this.showFlat(loaded?.objectUrl ?? pic.hd, loaded?.luma);
+      }
+    } catch (e) {
+      if (loaded) URL.revokeObjectURL(loaded.objectUrl);
+      throw e;
+    }
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    this.objectUrl = loaded?.objectUrl;
   }
 
-  private async showSphere(pic: Picture): Promise<void> {
-    const position = {
-      yaw: Math.random() * 2 * Math.PI,
-      pitch: ((Math.random() * 16 - 8) * Math.PI) / 180,
-    };
+  /** Télécharge l'image (HD, sinon SD) et l'analyse ; null si le navigateur refuse (CORS…). */
+  private async load(pic: Picture): Promise<{ objectUrl: string; luma: LumaGrid } | null> {
+    for (const url of [pic.hd, pic.sd]) {
+      if (!url) continue;
+      try {
+        return await loadWithLuma(url);
+      } catch (e) {
+        console.warn('Chargement impossible', url, e);
+      }
+    }
+    return null;
+  }
+
+  private async showSphere(url: string, luma: LumaGrid): Promise<void> {
+    const aspect = Math.max(1, this.root().clientWidth / Math.max(1, this.root().clientHeight));
+    const position = chooseSphereView(luma, SPHERE_FOV, aspect);
+    if (!position) throw new RejectedPicture('Aucun cadrage exploitable');
+
+    this.flatEl.hidden = true;
+    this.sphereEl.hidden = false;
     if (!this.sphere) {
       this.sphere = new Viewer({
         container: this.sphereEl,
+        // Les métadonnées XMP de certaines caméras décrivent un recadrage erroné,
+        // ce qui laissait des zones noires : on considère toujours l'image entière.
+        adapter: EquirectangularAdapter.withConfig({ useXmpData: false }),
         // Zoom verrouillé : minFov === maxFov
         minFov: SPHERE_FOV,
         maxFov: SPHERE_FOV,
@@ -62,50 +97,55 @@ export class ZoomedViewer {
       // Le conteneur a pu être masqué entre-temps : on recalcule sa taille
       this.sphere.autoSize();
     }
-    try {
-      await this.sphere.setPanorama(pic.hd, { position, transition: false, showLoader: true });
-    } catch {
-      if (!pic.sd) throw new Error('Image introuvable');
-      await this.sphere.setPanorama(pic.sd, { position, transition: false, showLoader: true });
-    }
+    await this.sphere.setPanorama(url, { position, transition: false, showLoader: true });
   }
 
-  private showFlat(pic: Picture): Promise<void> {
+  private showFlat(url: string, luma?: LumaGrid): Promise<void> {
     return new Promise((resolve, reject) => {
       const img = this.flatImg;
-      img.style.visibility = 'hidden';
       img.onload = () => {
-        this.layoutFlat(true);
-        img.style.visibility = '';
+        this.sphereEl.hidden = true;
+        this.flatEl.hidden = false;
+        const size = this.flatSize();
+        let view: { u: number; v: number } | null;
+        if (luma) {
+          view = chooseFlatView(luma, size.W / size.dw, size.H / size.dh);
+          if (!view) return reject(new RejectedPicture('Aucun cadrage exploitable'));
+        } else {
+          // Pas d'analyse possible : on reste plutôt vers le milieu (ciel / sol peu intéressants)
+          view = { u: Math.random(), v: 0.35 + 0.3 * Math.random() };
+        }
+        this.flat.tx = size.W / 2 - view.u * size.dw;
+        this.flat.ty = size.H / 2 - view.v * size.dh;
+        this.layoutFlat();
         resolve();
       };
-      img.onerror = () => {
-        if (pic.sd && img.src !== pic.sd) img.src = pic.sd;
-        else reject(new Error('Image introuvable'));
-      };
-      img.src = pic.hd;
+      img.onerror = () => reject(new Error('Image introuvable'));
+      img.src = url;
     });
   }
 
-  /** Dimensionne l'image en "cover" × FLAT_ZOOM, puis la positionne. */
-  private layoutFlat(randomize: boolean): void {
+  private root(): HTMLElement {
+    return this.sphereEl.parentElement!;
+  }
+
+  /** Taille d'affichage : l'image en "cover" × FLAT_ZOOM. */
+  private flatSize() {
+    const img = this.flatImg;
+    const W = this.root().clientWidth;
+    const H = this.root().clientHeight;
+    const cover = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+    return { W, H, dw: img.naturalWidth * cover * FLAT_ZOOM, dh: img.naturalHeight * cover * FLAT_ZOOM };
+  }
+
+  private layoutFlat(): void {
     const img = this.flatImg;
     if (this.flatEl.hidden || !img.naturalWidth) return;
-    const W = this.flatEl.clientWidth;
-    const H = this.flatEl.clientHeight;
-    const cover = Math.max(W / img.naturalWidth, H / img.naturalHeight);
-    const dw = img.naturalWidth * cover * FLAT_ZOOM;
-    const dh = img.naturalHeight * cover * FLAT_ZOOM;
+    const { W, H, dw, dh } = this.flatSize();
     img.style.width = `${dw}px`;
     img.style.height = `${dh}px`;
-    const f = this.flat;
-    f.minX = W - dw;
-    f.minY = H - dh;
-    if (randomize) {
-      f.tx = f.minX * Math.random();
-      // On reste plutôt vers le milieu verticalement (ciel / sol peu intéressants)
-      f.ty = f.minY * (0.3 + 0.4 * Math.random());
-    }
+    this.flat.minX = W - dw;
+    this.flat.minY = H - dh;
     this.applyFlat();
   }
 

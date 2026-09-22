@@ -24,6 +24,8 @@ const ui = {
   screenText: $('screen-text'),
   screenExtra: $('screen-extra'),
   startBtn: $<HTMLButtonElement>('start-btn'),
+  skipBtn: $<HTMLButtonElement>('skip-btn'),
+  loading: $('loading'),
 };
 
 const BEST_KEY = 'descartesguessr.best';
@@ -54,7 +56,7 @@ interface RoundResult {
 
 let pool: Picture[] | null = null;
 let queue: Picture[] = [];
-let used = new Set<string>();
+let shown = new Set<string>();
 let results: RoundResult[] = [];
 let current: Picture | null = null;
 let guess: LonLat | null = null;
@@ -104,10 +106,10 @@ async function startGame(): Promise<void> {
     pool = null;
     return;
   }
-  // On tire plus de photos que nécessaire pour pouvoir remplacer celles qui ne chargent pas
-  queue = pickSpread(pool, pool.length, MIN_SPREAD_METERS, (p) => p.coords);
+  // Toutes les photos, mélangées : celles qui ne chargent pas ou sont trop sombres sont remplacées
+  queue = pickSpread(pool, pool.length, 0, (p) => p.coords);
   totalRounds = Math.min(ROUNDS, queue.length);
-  used = new Set();
+  shown = new Set();
   results = [];
   ui.hudRounds.textContent = String(totalRounds);
   ui.hudScore.textContent = '0';
@@ -125,23 +127,39 @@ async function nextRound(): Promise<void> {
   ui.guessBtn.textContent = 'Placez votre réponse sur la carte';
   ui.hudRound.textContent = String(results.length + 1);
   setPanelMode('guess');
+  await loadPicture();
+}
 
-  while (queue.length) {
-    const pic = queue.shift()!;
-    if (used.has(pic.id)) continue;
-    used.add(pic.id);
+/** Prochaine photo à essayer : loin des lieux déjà vus si possible. */
+function nextCandidate(): Picture | undefined {
+  const seen = [...shown].map((id) => pool!.find((p) => p.id === id)!.coords);
+  const far = queue.findIndex((p) => seen.every((c) => haversine(c, p.coords) >= MIN_SPREAD_METERS));
+  const i = far >= 0 ? far : 0;
+  return queue.splice(i, 1)[0];
+}
+
+/** Charge une photo exploitable pour la manche en cours (en sautant les noires, cassées…). */
+async function loadPicture(): Promise<void> {
+  ui.loading.hidden = false;
+  ui.skipBtn.disabled = true;
+  let pic: Picture | undefined;
+  while ((pic = nextCandidate())) {
     try {
       await viewer.show(pic);
       current = pic;
+      shown.add(pic.id);
       renderCredits(pic);
+      ui.loading.hidden = true;
+      ui.skipBtn.disabled = false;
       return;
     } catch (e) {
-      console.warn('Photo ignorée', pic.id, e);
+      console.warn('Photo ignorée', pic.id, (e as Error).message);
     }
   }
+  ui.loading.hidden = true;
   // Plus aucune photo utilisable
   if (results.length) endGame();
-  else showScreen("Les photos n'ont pas pu être chargées.", '', 'Réessayer');
+  else showScreen("Aucune photo exploitable n'a pu être chargée.", '', 'Réessayer');
 }
 
 function renderCredits(pic: Picture): void {
@@ -153,7 +171,7 @@ function renderCredits(pic: Picture): void {
 }
 
 function submitGuess(): void {
-  if (!current || !guess) return;
+  if (!current || !guess || !ui.loading.hidden) return;
   const distance = haversine(current.coords, guess);
   const points = score(distance);
   results.push({ pic: current, guess, distance, points });
@@ -206,6 +224,11 @@ ui.startBtn.addEventListener('click', () => {
   void startGame();
 });
 ui.guessBtn.addEventListener('click', submitGuess);
+ui.skipBtn.addEventListener('click', () => {
+  if (current) shown.delete(current.id);
+  current = null;
+  void loadPicture();
+});
 ui.nextBtn.addEventListener('click', () => {
   if (results.length >= totalRounds) endGame();
   else void nextRound();
